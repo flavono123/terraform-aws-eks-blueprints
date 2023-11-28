@@ -71,11 +71,11 @@ module "eks" {
 
   eks_managed_node_groups = {
     initial = {
-      instance_types = ["t4g.medium"]
+      instance_types = ["t3.medium"]
       min_size       = 1
       max_size       = 2
       desired_size   = 1
-      ami_type       = "AL2_ARM_64"
+      # ami_type       = "AL2_X86_64" # default
     }
   }
 
