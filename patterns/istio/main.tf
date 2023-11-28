@@ -38,7 +38,7 @@ locals {
   azs      = slice(data.aws_availability_zones.available.names, 0, 2)
 
   istio_chart_url     = "https://istio-release.storage.googleapis.com/charts"
-  istio_chart_version = "1.18.1"
+  istio_chart_version = "1.20.0"
 
   tags = {
     Blueprint  = local.name
