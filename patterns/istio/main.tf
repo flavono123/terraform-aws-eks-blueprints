@@ -37,8 +37,9 @@ locals {
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 2)
 
-  istio_chart_url     = "https://istio-release.storage.googleapis.com/charts"
-  istio_chart_version = "1.20.0"
+  istio_chart_url                 = "https://istio-release.storage.googleapis.com/charts"
+  istio_chart_version             = "1.20.0"
+  istio_chart_version_major_minor = join(".", slice(split(".", local.istio_chart_version), 0, 2))
 
   tags = {
     Blueprint  = local.name
@@ -207,4 +208,37 @@ module "vpc" {
   }
 
   tags = local.tags
+}
+
+resource "terraform_data" "post_install" {
+  depends_on = [module.eks]
+
+
+  # Set a ctx in kubeconfig
+  provisioner "local-exec" {
+    command = <<EOT
+      aws eks update-kubeconfig --name ${module.eks.cluster_name} --alias ${module.eks.cluster_name} --user-alias ${module.eks.cluster_name}
+      sed -i 's%${module.eks.cluster_arn}%${module.eks.cluster_name}%g' ~/.kube/config
+    EOT
+  }
+
+
+  # Workaround for istiod issue; https://github.com/istio/istio/issues/35789
+  provisioner "local-exec" {
+    command = <<EOT
+      kubectl rollout restart deployment istio-ingress -n istio-ingress
+    EOT
+  }
+
+
+  # Install Istio Addons
+  provisioner "local-exec" {
+    command = <<EOT
+      for ADDON in kiali jaeger prometheus grafana
+      do
+          ADDON_URL="https://raw.githubusercontent.com/istio/istio/release-${local.istio_chart_version_major_minor}/samples/addons/$ADDON.yaml"
+          kubectl apply -f $ADDON_URL
+      done
+    EOT
+  }
 }
