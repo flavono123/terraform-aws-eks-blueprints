@@ -75,7 +75,7 @@ module "eks" {
       instance_types = ["t3.medium"]
       min_size       = 1
       max_size       = 2
-      desired_size   = 1
+      desired_size   = 2
       # ami_type       = "AL2_X86_64" # default
     }
   }
@@ -239,6 +239,28 @@ resource "terraform_data" "post_install" {
           ADDON_URL="https://raw.githubusercontent.com/istio/istio/release-${local.istio_chart_version_major_minor}/samples/addons/$ADDON.yaml"
           kubectl apply -f $ADDON_URL
       done
+    EOT
+  }
+}
+
+resource "terraform_data" "bookinfo" {
+  depends_on = [terraform_data.post_install]
+
+  provisioner "local-exec" {
+    command = <<EOT
+      kubectl label namespace default istio-injection=enabled
+      kubectl -n default apply -f https://raw.githubusercontent.com/istio/istio/release-${local.istio_chart_version_major_minor}/samples/bookinfo/platform/kube/bookinfo.yaml
+    EOT
+  }
+}
+
+resource "terraform_data" "ingress_gateway" {
+  depends_on = [terraform_data.post_install]
+
+  provisioner "local-exec" {
+    command = <<EOT
+      kubectl -n default apply -f https://raw.githubusercontent.com/istio/istio/release-${local.istio_chart_version_major_minor}/samples/bookinfo/networking/bookinfo-gateway.yaml
+      echo "Caveat: Change the gateway's port(.spec.servers[0].port.number) to 80"
     EOT
   }
 }
