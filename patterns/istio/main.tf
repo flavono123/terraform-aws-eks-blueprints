@@ -32,13 +32,14 @@ data "aws_availability_zones" "available" {}
 
 locals {
   name   = basename(path.cwd)
-  region = "us-west-2"
+  region = "ap-northeast-2"
 
   vpc_cidr = "10.0.0.0/16"
-  azs      = slice(data.aws_availability_zones.available.names, 0, 3)
+  azs      = slice(data.aws_availability_zones.available.names, 0, 2)
 
-  istio_chart_url     = "https://istio-release.storage.googleapis.com/charts"
-  istio_chart_version = "1.18.1"
+  istio_chart_url                 = "https://istio-release.storage.googleapis.com/charts"
+  istio_chart_version             = "1.20.0"
+  istio_chart_version_major_minor = join(".", slice(split(".", local.istio_chart_version), 0, 2))
 
   tags = {
     Blueprint  = local.name
@@ -71,11 +72,11 @@ module "eks" {
 
   eks_managed_node_groups = {
     initial = {
-      instance_types = ["m5.large"]
-
-      min_size     = 1
-      max_size     = 5
-      desired_size = 2
+      instance_types = ["t3.medium"]
+      min_size       = 1
+      max_size       = 2
+      desired_size   = 2
+      # ami_type       = "AL2_X86_64" # default
     }
   }
 
@@ -207,4 +208,69 @@ module "vpc" {
   }
 
   tags = local.tags
+}
+
+resource "terraform_data" "post_install" {
+  depends_on = [module.eks]
+
+
+  # Set a ctx in kubeconfig
+  provisioner "local-exec" {
+    command = <<EOT
+      aws eks update-kubeconfig --name ${module.eks.cluster_name} --alias ${module.eks.cluster_name} --user-alias ${module.eks.cluster_name}
+      sed -i 's%${module.eks.cluster_arn}%${module.eks.cluster_name}%g' ~/.kube/config
+    EOT
+  }
+
+
+  # Workaround for istiod issue; https://github.com/istio/istio/issues/35789
+  provisioner "local-exec" {
+    command = <<EOT
+      kubectl rollout restart deployment istio-ingress -n istio-ingress
+    EOT
+  }
+
+
+  # Install Istio Addons
+  provisioner "local-exec" {
+    command = <<EOT
+      for ADDON in kiali jaeger prometheus grafana
+      do
+          ADDON_URL="https://raw.githubusercontent.com/istio/istio/release-${local.istio_chart_version_major_minor}/samples/addons/$ADDON.yaml"
+          kubectl apply -f $ADDON_URL
+      done
+    EOT
+  }
+}
+
+resource "terraform_data" "bookinfo" {
+  depends_on = [terraform_data.post_install]
+
+  provisioner "local-exec" {
+    command = <<EOT
+      kubectl label namespace default istio-injection=enabled
+      kubectl -n default apply -f https://raw.githubusercontent.com/istio/istio/release-${local.istio_chart_version_major_minor}/samples/bookinfo/platform/kube/bookinfo.yaml
+    EOT
+  }
+}
+
+resource "terraform_data" "ingress_gateway" {
+  depends_on = [terraform_data.post_install]
+
+  provisioner "local-exec" {
+    command = <<EOT
+      kubectl -n default apply -f https://raw.githubusercontent.com/istio/istio/release-${local.istio_chart_version_major_minor}/samples/bookinfo/networking/bookinfo-gateway.yaml
+      echo "Caveat: Change the gateway's port(.spec.servers[0].port.number) to 80"
+    EOT
+  }
+}
+
+resource "terraform_data" "destination_rule" {
+  depends_on = [terraform_data.post_install]
+
+  provisioner "local-exec" {
+    command = <<EOT
+      kubectl -n default apply -f https://raw.githubusercontent.com/istio/istio/release-${local.istio_chart_version_major_minor}/samples/bookinfo/networking/destination-rule-all.yaml
+    EOT
+  }
 }
