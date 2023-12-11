@@ -264,3 +264,13 @@ resource "terraform_data" "ingress_gateway" {
     EOT
   }
 }
+
+resource "terraform_data" "destination_rule" {
+  depends_on = [terraform_data.post_install]
+
+  provisioner "local-exec" {
+    command = <<EOT
+      kubectl -n default apply -f https://raw.githubusercontent.com/istio/istio/release-${local.istio_chart_version_major_minor}/samples/bookinfo/networking/destination-rule-all.yaml
+    EOT
+  }
+}
